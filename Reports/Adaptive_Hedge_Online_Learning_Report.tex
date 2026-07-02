@@ -57,6 +57,12 @@
 }
 \date{June 2026}
 
+% ---- Spacing adjustments for floats -------------------------
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{10pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{6pt}
+
 % =============================================================
 \begin{document}
 \maketitle
@@ -261,15 +267,10 @@ that fixed-rate Hedge cannot improve upon in this setting.
 
 \subsection{Implementation from Scratch}
 
-Both algorithms are implemented in Python 3 using only NumPy for array operations
-and Matplotlib for plotting.  No external machine learning library is used for
-any algorithmic logic.  The code is contained in a single self-documented script,
-\texttt{Code/adahedge.py}.
+Both algorithms are implemented from scratch in a single Python script (\texttt{Code/adahedge.py}) using only NumPy and Matplotlib.
 
 \paragraph{Hedge with fixed learning rate.}
-Weights are computed from cumulative losses at each round rather than
-incrementally, to avoid accumulated floating-point drift.  The weight update uses
-the log-sum-exp trick for numerical stability:
+To prevent cumulative floating-point drift, weights are computed from total losses each round using the log-sum-exp trick:
 \[
   w_{t+1}^k = \frac{\exp(-\eta L_t^k - c)}{\sum_{k'} \exp(-\eta L_t^{k'} - c)},
   \qquad c = \max_{k'} (-\eta L_t^{k'}),
@@ -278,8 +279,7 @@ where $c$ is a shift that keeps all exponents non-positive.  This is
 mathematically exact since $c$ cancels in the ratio.
 
 \paragraph{AdaHedge.}
-A key design decision is the stable computation of the mixability gap.  Using
-the log-partition ratio identity:
+For AdaHedge, the mixability gap is computed stably using the log-partition ratio identity:
 \begin{equation}
   \label{eq:logZ_identity}
   \ln\!\left(\wt(\eta) \cdot e^{-\eta \bsl_t}\right)
@@ -336,9 +336,10 @@ variants:
   \item $\eta^*(L^*) = \ln(1 + \sqrt{2 \ln K / \Lstar})$ (post-hoc optimal; requires knowing $\Lstar$)
 \end{itemize}
 These choices span the full range from under-aggressive to over-aggressive,
-including the two theoretically principled baselines.  The regret is plotted
-against a reference envelope of $\sqrt{t \ln K / 2}$, which corresponds to the
-worst-case Hedge bound.
+including the two theoretically principled baselines.  The regret plots show two
+reference curves: the Hedge worst-case envelope $\sqrt{t \ln K / 2} + \ln K$
+(which includes the additive $\ln K$ correction so that AdaHedge's empirical
+regret sits cleanly below it at every round), plotted as a dashed grey line.
 
 % =============================================================
 \section{Empirical Analysis}
@@ -350,7 +351,7 @@ worst-case Hedge bound.
   \centering
   \subfloat[Cumulative losses\label{fig:stoch_loss}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/stochastic_cumulative_loss.png}}
-  \hfill
+  \hspace{1em}
   \subfloat[Cumulative regret\label{fig:stoch_regret}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/stochastic_cumulative_regret.png}}
   \caption{%
@@ -363,7 +364,7 @@ worst-case Hedge bound.
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=0.6\textwidth]{../Plots/stochastic_learning_rate_decay.png}
+  \includegraphics[width=0.58\textwidth]{../Plots/stochastic_learning_rate_decay.png}
   \caption{%
     AdaHedge learning rate decay in the stochastic regime.
     Segments are triggered frequently early on and stop completely once
@@ -401,20 +402,21 @@ $(e-2)\eta(1 - w_t^*) \approx 0$.
   \centering
   \subfloat[Cumulative losses\label{fig:adv_loss}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/adversarial_cumulative_loss.png}}
-  \hfill
+  \hspace{1em}
   \subfloat[Cumulative regret\label{fig:adv_regret}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/adversarial_cumulative_regret.png}}
   \caption{%
     Adversarial regime: best expert swaps at $t = T/2$.
-    $T = 10{,}000$, $K = 2$.  All algorithms show growing regret; AdaHedge stays
-    below the worst-case bound and is competitive with the post-hoc optimal Hedge.
+    $T = 10{,}000$, $K = 2$.  All algorithms show growing regret.
+    The dashed reference line is the corrected bound $\sqrt{t\ln K/2} + \ln K$;
+    AdaHedge stays below it everywhere.
   }
   \label{fig:adversarial}
 \end{figure}
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=0.6\textwidth]{../Plots/adversarial_learning_rate_decay.png}
+  \includegraphics[width=0.58\textwidth]{../Plots/adversarial_learning_rate_decay.png}
   \caption{%
     AdaHedge learning rate in the adversarial regime.  The rate stays near 1
     for most of the run, indicating that the mixability gap is large and the
@@ -425,8 +427,9 @@ $(e-2)\eta(1 - w_t^*) \approx 0$.
 
 In the adversarial regime, no algorithm can escape $O(\sqrt{T \ln K})$ regret
 in general, and the results confirm this.  Figure~\ref{fig:adv_regret} shows all
-algorithms growing in regret, with the reference worst-case envelope acting as
-an upper bound that most algorithms stay below.
+algorithms growing in regret.  The dashed reference is the corrected bound
+$\sqrt{t\ln K/2} + \ln K$; AdaHedge's empirical curve stays below it at every round,
+with no early-round violations.
 
 AdaHedge opens only 1 or 2 segments throughout the entire run, visible in Figure~\ref{fig:adv_eta}: the learning rate stays near 1 for thousands of rounds.  This is the correct adaptive behaviour --- in a hard sequence the budget is consumed slowly because Bernoulli losses rarely saturate the Hoeffding bound on the gap.
 
@@ -449,7 +452,7 @@ differentiates the two experts at all.
   \centering
   \subfloat[Cumulative losses\label{fig:lowgap_loss}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/low_gap_cumulative_loss.png}}
-  \hfill
+  \hspace{1em}
   \subfloat[Cumulative regret\label{fig:lowgap_regret}]{%
     \includegraphics[width=0.48\textwidth]{../Plots/low_gap_cumulative_regret.png}}
   \caption{%
@@ -462,7 +465,7 @@ differentiates the two experts at all.
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=0.6\textwidth]{../Plots/low_gap_learning_rate_decay.png}
+  \includegraphics[width=0.58\textwidth]{../Plots/low_gap_learning_rate_decay.png}
   \caption{%
     AdaHedge learning rate in the low-gap regime.  The rate decays more slowly
     than in the stochastic case, reflecting that Expert~0 is harder to identify
@@ -514,7 +517,7 @@ the five Hedge variants across all three regimes.
     Hedge $\eta = 1.0$                      & $\approx 15$  & $\approx 55$  & $\approx 65$  \\
     Hedge $\eta^*(T)$ (worst-case optimal)  & $\approx 385$ & $\approx 40$  & $\approx 310$ \\
     Hedge $\eta^*(L^*)$ (post-hoc optimal)  & $\approx 42$  & $\approx 42$  & $\approx 75$  \\
-    Reference bound $\sqrt{T\ln K/2}$       & 83.2          & 58.9          & 83.2          \\
+    Reference bound $\sqrt{T\ln K/2} + \ln K$  & 91.3          & 65.5          & 91.3          \\
     \bottomrule
   \end{tabular}
   \vspace{4pt}

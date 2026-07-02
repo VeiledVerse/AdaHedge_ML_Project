@@ -557,13 +557,21 @@ def compute_adahedge_theoretical_regret_bound(
     """
     Compute the AdaHedge worst-case theoretical regret bound per round t.
 
+    Full bound from Theorem 3 (van Erven et al. 2011):
+        R_T  <=  C(φ) · √(4/(e-1) · L*_T · ln K)  +  (φ/(φ-1)) · (1/(e-1) + 1) · ln K
+
+    The additive O(ln K) correction dominates when L*_t is small (early
+    rounds).  Without it, the leading-order square-root term underestimates
+    the true bound and AdaHedge's empirical regret can appear to exceed its
+    own theoretical guarantee -- a misleading plotting artefact.
+
     Args:
         cumulative_best_expert_losses  : L*_t for each round t, shape (T,).
         total_number_of_experts        : K.
         segment_learning_rate_decay_factor : φ.
 
     Returns:
-        theoretical_regret_upper_bound : shape (T,), leading-order bound per t.
+        theoretical_regret_upper_bound : shape (T,), full bound per t.
     """
     phi = segment_learning_rate_decay_factor
     eulers_number = np.exp(1.0)
@@ -573,12 +581,22 @@ def compute_adahedge_theoretical_regret_bound(
         phi * np.sqrt(phi**2 - 1.0) / (phi - 1.0)
     )
 
-    # Main term: C(φ) · √(4/(e−1) · L*_T · ln(K))
-    theoretical_regret_upper_bound = adahedge_leading_constant * np.sqrt(
+    # Leading-order term: C(φ) · √(4/(e−1) · L*_T · ln(K))
+    leading_order_term = adahedge_leading_constant * np.sqrt(
         (4.0 / (eulers_number - 1.0))
         * cumulative_best_expert_losses
         * np.log(total_number_of_experts)
     )
+
+    # Additive correction (lower-order term from Theorem 3):
+    #   (φ/(φ-1)) · (1/(e-1) + 1) · ln(K)
+    additive_correction = (
+        phi / (phi - 1.0)
+        * (1.0 / (eulers_number - 1.0) + 1.0)
+        * np.log(total_number_of_experts)
+    )
+
+    theoretical_regret_upper_bound = leading_order_term + additive_correction
 
     return theoretical_regret_upper_bound
 
@@ -589,6 +607,13 @@ def compute_fixed_hedge_worst_case_bound(
 ) -> np.ndarray:
     """
     Compute the worst-case regret bound for Hedge with η = √(2 ln K / T).
+
+    NOTE: This is an ENVELOPE bound -- it evaluates √(t · ln K / 2) at each
+    round t, which corresponds to the bound achieved by the BEST possible
+    fixed η for that specific horizon t.  Any single fixed-η Hedge run
+    (including η*(T)) may exceed this curve at intermediate rounds because
+    its η was tuned for the final T, not for each t.  This is expected and
+    does NOT indicate a bug.
 
     Args:
         total_number_of_rounds  : T.
