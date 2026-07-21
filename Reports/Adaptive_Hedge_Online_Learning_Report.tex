@@ -49,7 +49,7 @@
 % ---- Title block --------------------------------------------
 \title{%
   \textbf{Online Learning with Adaptive Hedge} \\[4pt]
-  {\large Assignment 1 --- Statistical Methods for Machine Learning} \\[2pt]
+  {\large Assignment 1: Statistical Methods for Machine Learning} \\[2pt]
   {\normalsize University of Milan, A.Y.\ 2025/26}
 }
 \author{%
@@ -90,23 +90,30 @@
 
 % =============================================================
 \begin{abstract}
-The Hedge algorithm is a classical solution to prediction with expert advice, but its
-performance depends heavily on a learning rate that must be fixed before the
-sequence of losses is observed.  This report studies AdaHedge, an adaptive
-variant that removes this requirement by monitoring a quantity called the
-\emph{mixability gap} and triggering a segment reset whenever the accumulated gap
-meets a budget threshold.  We implement both algorithms from scratch in Python,
-generate three synthetic loss regimes (stochastic, adversarial, and low-gap
-stochastic) following the experimental setup of van Erven et al.\ (NeurIPS 2011),
-and compare regret curves against five fixed learning rates.  The results show
-that AdaHedge achieves near-constant regret in the stochastic regime
-(final regret approximately 9 over 10,000 rounds) while still matching the
-$O(\sqrt{T \ln K})$ worst-case bound in the adversarial regime.  In the
-low-gap setting, AdaHedge substantially outperforms every fixed-rate Hedge
-variant, confirming the theoretical prediction of Theorem~4 of the paper.
-The learning rate decay plots show the segment-doubling mechanism adapting
-the rate from 1 down to $2^{-6}$ in the stochastic case, and staying near 1
-in the adversarial case, a direct reflection of problem difficulty.
+Hedge is a classic algorithm for prediction with expert advice, but it needs a
+learning rate fixed in advance. Pick it wrong and the algorithm either reacts
+too slowly to an easy problem or too fast to a hard one. This report studies
+AdaHedge, which removes that requirement. It watches a quantity called the
+mixability gap and switches to a smaller rate once the gap uses up its budget.
+I implemented both algorithms from scratch in Python, built three synthetic
+loss sequences (stochastic, adversarial, and low-gap stochastic) following the
+setup in van Erven et al. (NeurIPS 2011), and compared AdaHedge against five
+fixed learning rates.
+
+In the stochastic regime one expert is clearly better than the rest, so
+AdaHedge never needs to change its rate. It stays at $\eta=1$ for all
+10{,}000 rounds and ends with a regret of $2.28$, exactly matching fixed Hedge
+at $\eta=1$. In the adversarial regime, where the best expert swaps halfway
+through, AdaHedge again uses a single rate the whole time and ends well
+inside its worst-case bound: regret $1.72$ against a bound of $313.13$
+(Theorem~5). The low-gap regime is the interesting one. The gap between
+experts is only $0.01$, so AdaHedge needs five segments before it settles
+down. Its final regret is $60.06$, slightly worse than plain fixed Hedge at
+$\eta=1.0$ or $\eta=0.5$ on this run. That is not a bug and not a broken
+guarantee: Theorem~5 only promises AdaHedge stays under $440.49$ here, and it
+does, with room to spare. It is simply a reminder that a constant-regret
+guarantee describes the worst case. It does not promise a win against every
+other method on every single run.
 \end{abstract}
 
 \clearpage
@@ -128,19 +135,19 @@ learner incurs the expected loss
 \[
   \wt \cdot \bsl_t = \sum_{k=1}^{K} w_t^k \, \ell_t^k.
 \]
-There is no probabilistic model for the losses.  The sequence can be chosen
-adversarially.
+There is no probabilistic model for the losses. The sequence can even be
+chosen by an adversary who wants the learner to fail.
 
 After $T$ rounds, expert $k$ has accumulated loss $L_T^k = \sum_{t=1}^T \ell_t^k$.
-The learner's goal is to minimise its \emph{regret}:
+The learner wants to minimise its \emph{regret}:
 \begin{equation}
   \label{eq:regret}
   R(T) = \sum_{t=1}^T \wt \cdot \bsl_t \;-\; \Lstar,
   \qquad \Lstar = \min_{1 \le k \le K} L_T^k.
 \end{equation}
-Regret measures how much more the learner loses compared to the single best
-expert in hindsight.  A sub-linear regret guarantee $R(T) = o(T)$ means the
-learner eventually performs as well as the best expert on average.
+Regret is how much worse the learner does than the single best expert in
+hindsight. A sub-linear guarantee, $R(T) = o(T)$, means the learner catches
+up to the best expert on average as $T$ grows.
 
 \subsection{The Hedge Algorithm}
 
@@ -165,31 +172,32 @@ $\eta^*(T) = \sqrt{8 \ln K / T}$, the resulting regret satisfies
   \label{eq:hedge_bound}
   R_{\mathrm{Hedge}}(T) \le \sqrt{\tfrac{T \ln K}{2}}.
 \end{equation}
-This bound is worst-case optimal (up to constants) over all sequences of losses,
-but it does not improve when the sequence is easy.  If instead $\Lstar$ were known
-in advance, one could set $\eta^*(L^*) = \ln\!\left(1 + \sqrt{2\ln K / \Lstar}\right)$
-to obtain the tighter bound $\sqrt{2 \Lstar \ln K} + \ln K$.  The problem is that
-neither $T$ nor $\Lstar$ is known before the game starts.
+This bound is worst-case optimal, up to constants, over every possible loss
+sequence. But it never gets better just because the sequence turns out to be
+easy. If $\Lstar$ were known ahead of time, setting
+$\eta^*(L^*) = \ln\!\left(1 + \sqrt{2\ln K / \Lstar}\right)$ gives the tighter
+bound $\sqrt{2 \Lstar \ln K} + \ln K$. The problem is that neither $T$ nor
+$\Lstar$ is known before the game starts.
 
-The tension is the central difficulty: a fixed rate must commit to an assumption about problem difficulty before seeing any losses.  This motivates an adaptive approach.
+This is the real difficulty: a fixed rate has to guess how hard the sequence
+will be before seeing a single loss. That is what an adaptive method should
+fix.
 
 \subsection{The Mixability Gap}
 
-Van Erven et al.\ (2011) introduce a quantity called the \emph{mixability gap}
-to measure, on each round, how much harder the actual loss is to handle compared
-to an ideal predictor.  Formally, the per-round mixability gap at learning rate
-$\eta$ is:
+Van Erven et al. (2011) define a quantity called the \emph{mixability gap}. It
+measures, round by round, how much harder the real loss is to handle than the
+loss of an ideal predictor. The per-round mixability gap at rate $\eta$ is:
 \begin{equation}
   \label{eq:mixgap}
   \delta_t(\eta)
     = \wt(\eta) \cdot \bsl_t
     \;+\; \frac{1}{\eta} \ln\!\left(\wt(\eta) \cdot e^{-\eta \bsl_t}\right).
 \end{equation}
-The subtracted term equals $(1/\eta)\ln(Z_t/Z_{t-1})$, where $Z_t$ is the
-normalisation constant of the weights after round $t$.  Equivalently, it is the
-loss incurred by the Aggregating Pseudo-Algorithm, which provides an idealised
-lower bound for any prediction strategy.  Three properties of the mixability gap
-are essential:
+The term being subtracted equals $(1/\eta)\ln(Z_t/Z_{t-1})$, where $Z_t$ is the
+normalising constant of the weights after round $t$. This is the loss of the
+Aggregating Pseudo-Algorithm, an idealised strategy that lower-bounds any
+prediction method. Two properties of the mixability gap matter here:
 
 \begin{lemma}[Lemma~1, van Erven et al.\ 2011]
   \label{lem:hoeffding}
@@ -208,8 +216,8 @@ are essential:
   where $\Delta_T(\eta) = \sum_{t=1}^T \delta_t(\eta)$.
 \end{lemma}
 
-This lemma links the cumulative gap to the performance of the best expert and
-is the key to deriving worst-case guarantees for AdaHedge.
+This lemma ties the cumulative gap to the best expert's performance. It is
+the key step behind AdaHedge's worst-case guarantees.
 
 \subsection{The Budget and the Segment Reset}
 
@@ -224,7 +232,7 @@ to uniform and the learning rate is divided by a factor $\phi > 1$.  The first
 segment starts at $\eta_1 = 1$, giving the sequence
 $\eta_1 = 1,\; \eta_2 = 1/\phi,\; \eta_3 = 1/\phi^2, \ldots$
 
-\begin{theorem}[Theorem~3, van Erven et al.\ 2011]
+\begin{theorem}[Theorem~5, van Erven et al.\ 2011]
   \label{thm:adahedge_main}
   After $T$ rounds, AdaHedge with decay factor $\phi > 1$ satisfies:
   \[
@@ -235,16 +243,17 @@ $\eta_1 = 1,\; \eta_2 = 1/\phi,\; \eta_3 = 1/\phi^2, \ldots$
   \]
 \end{theorem}
 
-Since $\Lstar \le T$, this bound is never worse than $O(\sqrt{T \ln K})$, matching the worst-case optimal rate of Hedge.
+Since $\Lstar \le T$, this bound is never worse than $O(\sqrt{T \ln K})$. That
+matches the worst-case optimal rate of Hedge.
 
-The bound in Theorem~\ref{thm:adahedge_main} also adapts to easy sequences.  If
-one expert is consistently better than all others, the cumulative loss gap grows
-linearly, the Hedge posterior for the best expert converges to 1, and the
-mixability gap shrinks to zero.  Once the gap is small enough, the cumulative
-gap never reaches the budget again, so AdaHedge never opens a new segment.
-Lemma~3 of the paper formalises this:
+The bound in Theorem~\ref{thm:adahedge_main} does better on easy sequences too.
+If one expert is consistently better than the rest, the cumulative loss gap
+grows linearly, the Hedge posterior for the best expert converges to 1, and
+the mixability gap shrinks to zero. Once the gap is small enough, the
+cumulative gap never reaches the budget again, so AdaHedge never opens a new
+segment. Lemma~6 of the paper says this formally:
 
-\begin{lemma}[Lemma~3, van Erven et al.\ 2011]
+\begin{lemma}[Lemma~6, van Erven et al.\ 2011]
   \label{lem:posterior}
   For any $t$ and $\eta \in (0,1]$:
   \[
@@ -253,13 +262,12 @@ Lemma~3 of the paper formalises this:
   where $w_t^*(\eta) = \max_k w_t^k(\eta)$ is the weight of the current leading expert.
 \end{lemma}
 
-As $w_t^* \to 1$, the per-round gap vanishes.  This leads directly to
-Theorem~4 of the paper, which states that in the probabilistic stochastic setting
---- where the expected loss of the best expert is strictly smaller than all
-others by a gap $\alpha > 0$ --- AdaHedge opens only a bounded number of segments,
-giving $\Rhat(T) = O(K + \log(1/\delta))$ with high probability.  The regret is
-therefore \emph{constant} in $T$, compared to the $O(\sqrt{T \ln K})$ rate
-that fixed-rate Hedge cannot improve upon in this setting.
+As $w_t^* \to 1$, the per-round gap vanishes. This leads to Theorem~9 of the
+paper. Suppose the best expert's expected loss is smaller than every other
+expert's by a gap $\alpha > 0$. Then, with high probability, AdaHedge opens
+only a bounded number of segments, so $\Rhat(T) = O(K + \log(1/\delta))$. The
+regret is therefore \emph{constant} in $T$. Fixed-rate Hedge cannot do better
+than $O(\sqrt{T \ln K})$ in this same setting.
 
 % =============================================================
 \section{Methodology}
@@ -285,16 +293,18 @@ For AdaHedge, the mixability gap is computed stably using the log-partition rati
   \ln\!\left(\wt(\eta) \cdot e^{-\eta \bsl_t}\right)
   = \ln Z_t - \ln Z_{t-1},
 \end{equation}
-where $Z_t = \sum_k \exp(-\eta S_t^k)$ and $S_t^k$ is the cumulative loss of
-expert $k$ within the current segment.  Both log-partition values are computed via
-stable log-sum-exp applied directly to the segment losses.  This avoids ever
-taking the logarithm of an individual weight, which would underflow to $-\infty$
-after about 710 rounds for $\eta = 1$ in float64 precision.  The cached value
-$\ln Z_{t-1}$ is updated each round to $\ln Z_t$ without extra cost.
+Here $Z_t = \sum_k \exp(-\eta S_t^k)$, and $S_t^k$ is expert $k$'s cumulative
+loss within the current segment. Both log-partition values come from a stable
+log-sum-exp applied directly to the segment losses. This way the code never
+takes the logarithm of a single weight. That matters because a single weight
+underflows to $0$ after about 710 rounds at $\eta = 1$ in float64, and the log
+of that is $-\infty$. The cached value $\ln Z_{t-1}$ is just updated to
+$\ln Z_t$ each round, at no extra cost.
 
-At the start of each segment, the segment losses $S^k$ are reset to zero
-(equivalent to resetting weights to uniform $1/K$), the learning rate is divided
-by $\phi = 2$, and the budget is recalculated according to equation~(\ref{eq:budget}).
+At the start of each segment, three things happen: the segment losses $S^k$
+reset to zero (the same as resetting weights to uniform $1/K$), the learning
+rate is divided by $\phi = 2$, and the budget is recalculated from
+equation~(\ref{eq:budget}).
 
 \subsection{Reproducibility}
 
@@ -309,20 +319,20 @@ $T = 10{,}000$ rounds, $K = 4$ experts.  Expert~0 draws losses from
 $\mathrm{Bernoulli}(0.3)$ and experts 1--3 from $\mathrm{Bernoulli}(0.5)$.
 The gap $\alpha = 0.2$ is large, so by the law of large numbers the cumulative
 loss gap $L_t^k - L_t^{0}$ grows linearly in $t$ for all $k \neq 0$.
-Theorem~4 predicts constant regret for AdaHedge in this regime.
+Theorem~9 predicts constant regret for AdaHedge in this regime.
 
 \paragraph{Adversarial regime.}
 $T = 10{,}000$ rounds, $K = 2$ experts.  For $t \le 5{,}000$, Expert~0 draws from
 $\mathrm{Bernoulli}(0.3)$ and Expert~1 from $\mathrm{Bernoulli}(0.7)$.  At $t = 5{,}001$
-the roles swap.  Because the best expert in hindsight has mean loss 0.5, the sequence is genuinely hard.  Theorem~3 predicts $O(\sqrt{T \ln K})$ regret for every algorithm.
+the roles swap. The best expert in hindsight ends up with mean loss 0.5, so this sequence is hard. Theorem~5 predicts $O(\sqrt{T \ln K})$ worst-case regret for AdaHedge here.
 
 \paragraph{Low-gap stochastic regime.}
 $T = 10{,}000$ rounds, $K = 4$ experts.  Expert~0 draws from
 $\mathrm{Bernoulli}(0.49)$ and experts 1--3 from $\mathrm{Bernoulli}(0.50)$.
 The gap is only $\alpha = 0.01$, so convergence of the best expert's posterior
-is slow.  The conditions of Theorem~4 still apply but the constant is much
+is slow.  The conditions of Theorem~9 still apply but the constant is much
 larger.  A fixed-rate Hedge with $\eta^*(T)$ optimised for the worst case uses
-$\eta \approx 0.037$, which is far too small to detect such a narrow gap.
+$\eta = 0.0333$, which is far too small to detect such a narrow gap.
 
 \subsection{Algorithms Compared}
 
@@ -335,11 +345,11 @@ variants:
   \item $\eta^*(T) = \sqrt{8 \ln K / T}$ (worst-case optimal for $T$ rounds)
   \item $\eta^*(L^*) = \ln(1 + \sqrt{2 \ln K / \Lstar})$ (post-hoc optimal; requires knowing $\Lstar$)
 \end{itemize}
-These choices span the full range from under-aggressive to over-aggressive,
-including the two theoretically principled baselines.  The regret plots show two
-reference curves: the Hedge worst-case envelope $\sqrt{t \ln K / 2} + \ln K$
-(which includes the additive $\ln K$ correction so that AdaHedge's empirical
-regret sits cleanly below it at every round), plotted as a dashed grey line.
+These five span the full range from too cautious to too aggressive, plus the
+two rates that theory says are correct. The regret plots also show one
+reference curve, plotted as a dashed grey line: the Hedge worst-case envelope
+$\sqrt{t \ln K / 2} + \ln K$. It includes the extra $\ln K$ term so that
+AdaHedge's empirical regret sits cleanly below it at every round.
 
 % =============================================================
 \section{Empirical Analysis}
@@ -367,34 +377,35 @@ regret sits cleanly below it at every round), plotted as a dashed grey line.
   \includegraphics[width=0.58\textwidth]{../Plots/stochastic_learning_rate_decay.png}
   \caption{%
     AdaHedge learning rate decay in the stochastic regime.
-    Segments are triggered frequently early on and stop completely once
-    the best expert's posterior is near 1.
+    AdaHedge never leaves its initial rate $\eta = 1$. The mixability gap
+    never uses up the budget $b(1) \approx 2.19$, so only one segment runs
+    for the whole 10{,}000 rounds.
   }
   \label{fig:stoch_eta}
 \end{figure}
 
-The stochastic regime is where AdaHedge is most clearly superior.  Expert~0 has a
-0.2 advantage in mean loss, and by round 10,000 the cumulative loss gap is roughly
-$0.2 \times 10{,}000 = 2{,}000$.  As shown in Figure~\ref{fig:stoch_regret},
-AdaHedge's regret levels off near round 2,000--3,000 and remains flat for the
-rest of the run.  The final cumulative regret is approximately 9 --- constant in
-$T$, exactly as Theorem~4 predicts.
+The stochastic regime is where AdaHedge does best. Expert~0 has a 0.2
+advantage in mean loss. By round 10,000 the loss gap between Expert~0 and the
+rest is roughly $0.2 \times 10{,}000 = 2{,}000$. Figure~\ref{fig:stoch_regret}
+shows AdaHedge's regret levelling off within the first few hundred rounds. It
+stays flat after that. The final regret is $2.28$, constant in $T$, just as
+Theorem~9 predicts.
 
-Among the fixed-rate competitors, $\eta = 1.0$ performs similarly well in this
-regime because the gap is large enough that an aggressive rate converges quickly.
-However, $\eta^*(T) \approx 0.037$ performs the worst of all because it is
-calibrated for adversarial sequences and is far too cautious to exploit a 0.2 gap.
-The post-hoc optimal rate does well but still accumulates roughly 30--40 more
-regret than AdaHedge by the end, showing that AdaHedge is competitive even with
-a strategy that cheats by knowing $\Lstar$ in advance.
+Fixed Hedge at $\eta=1.0$ lands on the exact same regret, $2.28$. That is not
+a coincidence. AdaHedge never leaves $\eta=1$ in this regime, so with a
+single segment its weight updates are identical to fixed Hedge at $\eta=1$.
+At the other end, $\eta^*(T)=0.0333$ does much worse, with regret $42.70$.
+This rate is tuned for the worst possible sequence over the whole horizon, so
+it is too cautious to make use of a 0.2 gap. The post-hoc rate,
+$\eta^*(L^*)=0.0301$, does no better even though it gets to look at $\Lstar$
+in hindsight: its regret is $47.19$, about $45$ more than AdaHedge.
 
-The learning rate plot (Figure~\ref{fig:stoch_eta}) shows the mechanism at work.
-AdaHedge opens 7 segments (reaching $\eta \approx 2^{-6} \approx 0.016$ by the
-last segment), with most segments appearing in the first 3,000 rounds.  After
-that the budget is never exhausted again because the mixability gap per round
-has become negligibly small: the best expert's posterior weight $w_t^*$ is close
-to 1, and by Lemma~\ref{lem:posterior} the per-round gap is at most
-$(e-2)\eta(1 - w_t^*) \approx 0$.
+The learning rate plot (Figure~\ref{fig:stoch_eta}) is just a flat line.
+AdaHedge opens one segment and never changes $\eta$ again. With a gap this
+big, the leading expert's posterior weight converges to 1 within a few dozen
+rounds. By Lemma~\ref{lem:posterior}, the per-round mixability gap then drops
+to almost zero almost right away, long before the budget $b(1)\approx 2.19$
+runs out. So the algorithm never has a reason to reset.
 
 \subsection{Adversarial Regime}
 
@@ -425,26 +436,29 @@ $(e-2)\eta(1 - w_t^*) \approx 0$.
   \label{fig:adv_eta}
 \end{figure}
 
-In the adversarial regime, no algorithm can escape $O(\sqrt{T \ln K})$ regret
-in general, and the results confirm this.  Figure~\ref{fig:adv_regret} shows all
-algorithms growing in regret.  The dashed reference is the corrected bound
-$\sqrt{t\ln K/2} + \ln K$; AdaHedge's empirical curve stays below it at every round,
-with no early-round violations.
+No algorithm can escape $O(\sqrt{T \ln K})$ regret here in general, and the
+results confirm that. Figure~\ref{fig:adv_regret} shows every algorithm's
+regret growing over time. The dashed line is the corrected bound
+$\sqrt{t\ln K/2}+\ln K$. AdaHedge's curve stays below it at every round and
+ends at $1.72$, well inside the more specific Theorem~5 bound of $313.13$ at
+$T=10{,}000$.
 
-AdaHedge opens only 1 or 2 segments throughout the entire run, visible in Figure~\ref{fig:adv_eta}: the learning rate stays near 1 for thousands of rounds.  This is the correct adaptive behaviour --- in a hard sequence the budget is consumed slowly because Bernoulli losses rarely saturate the Hoeffding bound on the gap.
+AdaHedge opens exactly one segment for the whole run. Figure~\ref{fig:adv_eta}
+shows the learning rate sitting flat at $1$ the entire time. This is the
+right behaviour: in a hard sequence the budget fills up slowly, since
+Bernoulli losses rarely come close to the Hoeffding bound on the gap.
 
-The sharp jump in regret near $t = 5{,}000$ is visible in
-Figure~\ref{fig:adv_loss}: at that point Expert~0's loss rate jumps from 0.3 to
-0.7, and any algorithm that has shifted weight heavily to Expert~0 suffers a burst
-of poor predictions.  AdaHedge handles this without a qualitative breakdown,
-because at $\eta = 1$ the weights are still reasonably spread and the probability
-mass shifts back to Expert~1 within a few hundred rounds after the swap.
+There is a kink in the loss curve around round $5{,}000$, visible in
+Figure~\ref{fig:adv_loss}. That is where Expert~0's loss rate jumps from 0.3
+to 0.7. Any algorithm that had shifted weight onto Expert~0 takes a hit right
+there. AdaHedge does not break down, though. At $\eta=1$ its weights stay
+spread out enough that probability mass shifts back to Expert~1 within a few
+hundred rounds.
 
-The aggressive fixed rate $\eta = 1.0$ performs similarly to AdaHedge here, since
-both are operating at essentially the same learning rate.  The conservative rates
-($\eta = 0.1, 0.5$) build up regret more slowly at first but never adapt to the
-swap, and the worst-case optimal rate $\eta^*(T)$ is so small that it barely
-differentiates the two experts at all.
+Fixed Hedge at $\eta=1.0$ does about as well as AdaHedge here, since both run
+at almost the same rate. The slower rates, $\eta=0.1$ and $\eta=0.5$, build up
+regret more gently at first but never catch the swap. The worst-case rate
+$\eta^*(T)$ is so small it barely tells the two experts apart at all.
 
 \subsection{Low-Gap Stochastic Regime}
 
@@ -458,7 +472,9 @@ differentiates the two experts at all.
   \caption{%
     Low-gap stochastic regime: Expert~0 $\sim \mathrm{Bernoulli}(0.49)$,
     Experts~1--3 $\sim \mathrm{Bernoulli}(0.50)$, $T = 10{,}000$, $K = 4$.
-    AdaHedge is the only algorithm that clearly exploits the narrow gap.
+    AdaHedge needs five segments to settle on a rate. Several fixed-$\eta$
+    baselines end up with lower regret on this run. AdaHedge still stays
+    well inside its theoretical guarantee (Theorem~5).
   }
   \label{fig:lowgap}
 \end{figure}
@@ -474,29 +490,42 @@ differentiates the two experts at all.
   \label{fig:lowgap_eta}
 \end{figure}
 
-The low-gap regime is arguably the most informative of the three, because it
-reveals the difference between an adaptive and a fixed strategy for a problem
-that is moderately easy but not obviously so.
+The low-gap regime is the most useful of the three. It shows the gap between
+an adaptive method and a fixed one, on a problem that is easy in theory but
+hard to spot in practice.
 
-Figure~\ref{fig:lowgap_regret} shows that most fixed-rate algorithms follow the
-reference envelope closely, meaning they fail to exploit the gap.  The worst
-offender is $\eta^*(T) \approx 0.037$, which is essentially blind to a 0.01
-difference in loss.  The aggressive rate $\eta = 1.0$ does noticeably better
-in the first few thousand rounds but overshoots and accumulates more regret later
-when random fluctuations cause the wrong expert to temporarily lead.
+Figure~\ref{fig:lowgap_regret} shows the worst-case-tuned rates struggling the
+most. $\eta^*(T)=0.0333$ gets regret $58.17$, and $\eta^*(L^*)=0.0235$ gets
+$62.91$. Both are almost blind to a gap this small, since they were tuned for
+a much harder sequence. What is a bit surprising is that the simple, aggressive
+rates do better here. $\eta=1.0$ gets the lowest regret of all six methods on
+this run, $35.42$, followed by $\eta=0.5$ at $36.78$ and $\eta=0.1$ at $42.25$.
 
-AdaHedge is the clear winner.  Its final regret is substantially lower than all
-five fixed-rate competitors, and the curve shows the characteristic flattening
-associated with convergence to the best expert.  Compared to the stochastic
-regime, convergence takes longer and the regret ceiling is higher.  This is
-consistent with the theory: the constant in Theorem~4 scales as $O(1/\alpha^2)$,
-and here $\alpha = 0.01$ compared to $\alpha = 0.2$ before.
+AdaHedge's final regret is $60.06$. That is worse than every fixed rate except
+the post-hoc one, and even a little worse than the worst-case rate
+$\eta^*(T)$. This does not break the theory. Theorem~5 only promises AdaHedge
+stays under $440.49$ here, and $60.06$ is well inside that. Here is what
+happens: with a gap this small ($\alpha=0.01$), AdaHedge spends its first
+five segments resetting to uniform weights and starting over. By the time it
+settles on $\eta=0.0625$, that rate is already more careful than even the
+$\eta=0.1$ baseline. It is too careful to catch a $0.01$ gap over the roughly
+$8{,}200$ rounds that are left.
 
-The learning rate decay in Figure~\ref{fig:lowgap_eta} shows the algorithm
-reaching a lower final rate than in the stochastic case.  Because the gap is
-small, the mixability gap per round is also small, so each segment lasts longer
-and fewer resets occur over the first 10,000 rounds.  The algorithm is, in effect,
-spending more time at each learning rate before the budget is consumed.
+The lesson here is simple. A constant-regret guarantee is about the worst
+case, no matter how big its constant is. It does not promise a win against
+every other method on one specific run. The constant behind Theorem~9 also
+grows fast as $\alpha$ shrinks: it scales roughly as $O(1/\alpha^2)$, through
+the number of segments $m^*$, which itself grows like $\log_\phi(1/\alpha^2)$.
+Here $\alpha=0.01$ is twenty times smaller than the $\alpha=0.2$ from the
+stochastic regime, so this constant is much bigger too.
+
+Figure~\ref{fig:lowgap_eta} shows exactly this. AdaHedge walks through five
+segments, $\eta$ going $1, 0.5, 0.25, 0.125$, then $0.0625$. All five changes
+happen in the first $1{,}800$ rounds. After that the rate never moves again
+for the remaining $8{,}200$ rounds. The gap is small, so the mixability gap
+per round shrinks more slowly than in the stochastic case. That means more
+resets, and more time, before the algorithm lands on a rate that stops using
+up its budget.
 
 \subsection{Summary of Results}
 
@@ -505,55 +534,66 @@ the five Hedge variants across all three regimes.
 
 \begin{table}[h]
   \centering
-  \caption{Final cumulative regret at $t = 10{,}000$.}
+  \small
+  \caption{Final cumulative regret at $t = 10{,}000$, re-run directly from the
+  submitted code with seed 777 (exact console output, not read off a plot).
+  $K=4$ in the stochastic and low-gap columns, $K=2$ in the adversarial column.}
   \label{tab:summary}
   \begin{tabular}{lrrr}
     \toprule
     Algorithm & Stochastic & Adversarial & Low-gap \\
     \midrule
-    AdaHedge ($\phi = 2$)                  & $\approx 9$   & $\approx 52$  & $\approx 38$  \\
-    Hedge $\eta = 0.1$                      & $\approx 360$ & $\approx 46$  & $\approx 290$ \\
-    Hedge $\eta = 0.5$                      & $\approx 45$  & $\approx 72$  & $\approx 80$  \\
-    Hedge $\eta = 1.0$                      & $\approx 15$  & $\approx 55$  & $\approx 65$  \\
-    Hedge $\eta^*(T)$ (worst-case optimal)  & $\approx 385$ & $\approx 40$  & $\approx 310$ \\
-    Hedge $\eta^*(L^*)$ (post-hoc optimal)  & $\approx 42$  & $\approx 42$  & $\approx 75$  \\
-    Reference bound $\sqrt{T\ln K/2} + \ln K$  & 91.3          & 65.5          & 91.3          \\
+    AdaHedge ($\phi = 2$)              & $2.28$  & $1.72$ & $60.06$ \\
+    Hedge $\eta = 0.1$                  & $14.92$ & $3.67$ & $42.25$ \\
+    Hedge $\eta = 0.5$                  & $3.70$  & $2.36$ & $36.78$ \\
+    Hedge $\eta = 1.0$                  & $2.28$  & $1.72$ & $35.42$ \\
+    Hedge $\eta^*(T)$, worst-case       & $42.70$ & $4.06$ & $58.17$ \\
+    Hedge $\eta^*(L^*)$, post-hoc       & $47.19$ & $4.10$ & $62.91$ \\
+    AdaHedge bound (Thm.~5, at $t=T$)   & $343.98$ & $313.13$ & $440.49$ \\
+    Fixed-Hedge envelope $\sqrt{T\ln K/2}$ & $83.26$ & $58.87$ & $83.26$ \\
     \bottomrule
   \end{tabular}
-  \vspace{4pt}
-  \par\footnotesize\textit{Note: values are read from the plots and rounded.}
 \end{table}
 
-Several patterns are worth noting.  First, no single fixed rate is good across all
-three regimes.  The worst-case optimal rate $\eta^*(T)$ does reasonably well in
-the adversarial case by design but is the worst performer in the two stochastic
-cases.  Conversely, $\eta = 1.0$ is near-optimal in the stochastic regime but
-performs worse in adversarial compared to more conservative choices.  AdaHedge is
-the only algorithm that is competitive across all three regimes without any prior
-knowledge of the sequence.
+A few patterns stand out. No single fixed rate works well in all three
+regimes. The worst-case rate $\eta^*(T)$ does fine in the adversarial case,
+since it was built for exactly that kind of sequence, but it is one of the
+worst performers in the two stochastic regimes. On the other hand, $\eta=1.0$
+is the best fixed rate in both stochastic regimes, but it loses to the more
+careful rates in the adversarial case.
 
-Second, the post-hoc optimal rate $\eta^*(L^*)$ is a useful reference because it
-requires knowing $\Lstar$ before the game begins, yet AdaHedge beats it in the
-stochastic regime and is within a few points in the other two.  This confirms that
-the adaptive mechanism finds a learning rate that is at least as good as an
-oracle-tuned rate in easy settings.
+AdaHedge does not need to know which regime it is in ahead of time. In the
+stochastic regime, and in the adversarial swap too, it matches the best fixed
+rate exactly, without ever seeing the sequence in advance. The low-gap regime
+breaks this pattern on this specific run: several fixed rates beat AdaHedge
+here, even though its theoretical bound (Theorem~5) still holds with plenty
+of room to spare. This is the clearest example in this report that a
+constant-regret guarantee is a worst-case statement, not a promise to win
+every comparison.
 
-
+The post-hoc rate $\eta^*(L^*)$ needs to know $\Lstar$ before the game
+starts, which is not a fair advantage for a real algorithm to have. AdaHedge
+still beats it clearly in the stochastic regime ($2.28$ vs $47.19$) and stays
+close behind it in the adversarial regime ($1.72$ vs $4.10$). In the low-gap
+regime, AdaHedge is the only method that beats the post-hoc rate at all
+($60.06$ vs $62.91$), though it still loses to the plainer fixed rates
+$\eta=1.0, 0.5, 0.1$ there. So AdaHedge usually keeps up with a rate that
+gets to cheat, without ever being told $\Lstar$ or $T$ in advance. It just
+does not guarantee a win every single time.
 
 % =============================================================
 \section*{References}
 \addcontentsline{toc}{section}{References}
 
-\begin{enumerate}[label={[\arabic*]}, leftmargin=2em]
+\small
+\begin{enumerate}[label={[\arabic*]}, leftmargin=2em, itemsep=2pt, parsep=0pt, topsep=4pt]
   \item Tim van Erven, Peter D.\ Gr\"{u}nwald, Wouter M.\ Koolen, and Steven de Rooij.
         \textit{Adaptive Hedge}.
         NeurIPS 2011.
         \texttt{https://arxiv.org/abs/1110.1877}
-
   \item Nicol\`{o} Cesa-Bianchi and G\'{a}bor Lugosi.
         \textit{Prediction, Learning, and Games}.
         Cambridge University Press, 2006.
-
   \item Yoav Freund and Robert E.\ Schapire.
         A decision-theoretic generalization of on-line learning and an application to boosting.
         \textit{Journal of Computer and System Sciences}, 55(1):119--139, 1997.

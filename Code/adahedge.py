@@ -105,7 +105,7 @@ def generate_adversarial_regime_losses(
     expert in hindsight (over all T rounds) has mean loss ≈ 
     (0.3 · T/2 + 0.7 · T/2) / T = 0.5, so no expert is substantially better
     than 0.5 in hindsight -- yet AdaHedge should still achieve O(√(T ln K)) 
-    regret (Theorem 3).
+    regret (Theorem 5).
 
     Args:
         total_number_of_rounds  : T, the number of rounds.
@@ -153,7 +153,7 @@ def generate_low_gap_stochastic_losses(
     Setup:
         - Expert 0  : Bernoulli(0.49)  -- best expert, barely better
         - Experts 1...(K-1) : Bernoulli(0.50) -- sub-optimal by gap Δ = 0.01
-    The gap 0.01 is smaller than in the stochastic regime.  By Theorem 4, 
+    The gap 0.01 is smaller than in the stochastic regime.  By Theorem 9,
     AdaHedge still achieves O(1) regret (with a much larger constant), because
     the cumulative loss gap grows linearly at rate Δ · T.  A fixed-η Hedge with
     η tuned for the worst case (η = √(2 ln K / T)) will fail to exploit
@@ -557,7 +557,7 @@ def compute_adahedge_theoretical_regret_bound(
     """
     Compute the AdaHedge worst-case theoretical regret bound per round t.
 
-    Full bound from Theorem 3 (van Erven et al. 2011):
+    Full bound from Theorem 5 (van Erven et al. 2011):
         R_T  <=  C(φ) · √(4/(e-1) · L*_T · ln K)  +  (φ/(φ-1)) · (1/(e-1) + 1) · ln K
 
     The additive O(ln K) correction dominates when L*_t is small (early
@@ -576,7 +576,7 @@ def compute_adahedge_theoretical_regret_bound(
     phi = segment_learning_rate_decay_factor
     eulers_number = np.exp(1.0)
 
-    # Leading constant C(φ) = φ · √(φ²−1) / (φ−1)  (from Theorem 3)
+    # Leading constant C(φ) = φ · √(φ²−1) / (φ−1)  (from Theorem 5)
     adahedge_leading_constant = (
         phi * np.sqrt(phi**2 - 1.0) / (phi - 1.0)
     )
@@ -588,7 +588,7 @@ def compute_adahedge_theoretical_regret_bound(
         * np.log(total_number_of_experts)
     )
 
-    # Additive correction (lower-order term from Theorem 3):
+    # Additive correction (lower-order term from Theorem 5):
     #   (φ/(φ-1)) · (1/(e-1) + 1) · ln(K)
     additive_correction = (
         phi / (phi - 1.0)
